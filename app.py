@@ -6,12 +6,14 @@ from llama_index.core import (VectorStoreIndex, SimpleDirectoryReader, get_respo
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core.node_parser import CodeSplitter, SemanticSplitterNodeParser
+from llama_index.readers.web import BeautifulSoupWebReader, WholeSiteReader
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.core.retrievers import VectorIndexRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 from llama_index.llms.mistralai import MistralAI
+
 import qdrant_client
 
 # Load environment variables
@@ -54,7 +56,10 @@ class RAGTool:
     def file_mapping(self, type):
         language_map = {
             'javascript':'.js',
-            'python':'.py'
+            'python':'.py',
+            'pdf':'.pdf',
+            'docx':'.docx',
+            'csv':'.csv'
         }
         return language_map[type]
 
@@ -89,11 +94,24 @@ class RAGTool:
         self._documents = documents
         
     def _load_documents(self, document_type: str, directory: str=None):
-        if directory:
-            self.directory = directory
-        file_extension = self.file_mapping(document_type)
-        reader = SimpleDirectoryReader(self.directory, recursive=True, required_exts=[file_extension])
-        self.documents = self.clean_documents(reader.load_data())
+        if document_type == "web":
+            if directory:
+                url = directory
+                self.directory = url
+            # loader = BeautifulSoupWebReader()
+            # documents = loader.load_data(urls=[url])
+            loader = WholeSiteReader(prefix=url, max_depth=0)
+            documents = loader.load_data(base_url=url)
+            
+            # Initialize the scraper with a prefix URL and maximum depth
+            self.documents = documents
+          
+        else:    
+            if directory:
+                self.directory = directory
+            file_extension = self.file_mapping(document_type)
+            reader = SimpleDirectoryReader(self.directory, recursive=True, required_exts=[file_extension])
+            self.documents = self.clean_documents(reader.load_data())
 
     def clean_up_text(self, content: str) -> str:
         # cleans up line breaks, etc. 
@@ -145,7 +163,18 @@ class RAGTool:
                 buffer_size=1, breakpoint_percentile_threshold=95, embed_model=self.embed_model
             )
             self._node_parser = node_parser
-            Settings.node_parser = node_parser        
+            Settings.node_parser = node_parser
+        
+        if document_type == "web":
+            print(document_type)
+            node_parser = CodeSplitter(
+                language="html",
+                chunk_lines=40,
+                chunk_lines_overlap=15,
+                max_chars=1500,
+            )
+            self._node_parser = node_parser
+            Settings.node_parser = node_parser
     
     def get_or_create_query_engine(self, document_type, vector_store=None):
         if document_type not in self._query_engines:
@@ -159,9 +188,8 @@ class RAGTool:
             
             vector_index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
             retriever = VectorIndexRetriever(index=vector_index, similarity_top_k=5)
-            response_synthesizer = get_response_synthesizer(response_mode="compact")
-            # response_synthesizer = get_response_synthesizer(response_mode="tree_summarize")
-            # response_synthesizer = get_response_synthesizer(response_mode="tree_summarize")
+            # response_synthesizer = get_response_synthesizer(response_mode="compact")
+            response_synthesizer = get_response_synthesizer(response_mode="tree_summarize")
             query_engine = RetrieverQueryEngine(retriever=retriever, response_synthesizer=response_synthesizer)
             self._query_engines[document_type] = query_engine
     
@@ -171,7 +199,7 @@ class RAGTool:
         # documents_to_ingest = self.clean_documents() added cleaning to loading so stored documents are cleaned already
         vector_store = QdrantVectorStore(client=self._client, collection_name=document_type)
         pipeline = IngestionPipeline(vector_store=vector_store)
-        pipeline.run(documents=self.documents)
+        pipeline.run(documents=self.documents, num_workers=2)
         
         self.get_or_create_query_engine(document_type, vector_store)
         
@@ -180,10 +208,14 @@ class RAGTool:
         response = query_engine.query(query_text)
         return response
 
-# Init rag pipeline with documents
-rag_tool = RAGTool(directory="./docs", llm_source=LLMSource.OPENAI)
-rag_tool.run_pipeline("python", "./docs")
-# query documents
-# response = rag_tool.query("I am not sure how to implement my Adyen gateway using SFRA. What do I need to do to ensure I capture the response data from the authorization request to adyen and send it to Riskified. I am not using PSD2 or Deco and am running an asynchronous deployment. I think the avs and cvv still need to be implemented", "javascript")  # Assuming the query is intended for JavaScript documents
-response = rag_tool.query("How does the privateGPT handle context retrieval? Can you provide some code examples and where I can find the code?","python")
-print(response)
+
+
+def main():
+    # Init rag pipeline with documents
+    rag_tool = RAGTool(directory="./docs", llm_source=LLMSource.ANTHROPIC)
+    rag_tool.run_pipeline("web", "https://www.nytimes.com/")
+    response = rag_tool.query("what's in the news today?", "web")
+    print(response)
+
+if __name__ == '__main__':
+    main()
