@@ -1,5 +1,6 @@
 import re
 import os
+import requests
 from enum import Enum
 from dotenv import load_dotenv
 from llama_index.core import (VectorStoreIndex, SimpleDirectoryReader, get_response_synthesizer, Settings)
@@ -26,7 +27,7 @@ class LLMSource(Enum):
     LOCAL = "local"
 
 class RAGTool:
-    def __init__(self, directory, model_name="BAAI/bge-small-en-v1.5", llm_source=LLMSource.LOCAL):
+    def __init__(self, directory, model_name="BAAI/bge-small-en-v1.5", llm_source="local"):
         self._directory = directory
         self._model_name = model_name
         self._client = qdrant_client.QdrantClient(url=os.getenv("QDRANT_URL"), api_key=os.getenv("QDRANT_API_KEY"))
@@ -38,14 +39,14 @@ class RAGTool:
         self._document_type = None
         
     def initialize_llm(self):
-        if self._llm_source == LLMSource.OPENAI:
+        if self._llm_source == "openai":
             llm = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4-turbo-preview")
-        elif self._llm_source == LLMSource.ANTHROPIC:
+        elif self._llm_source == "anthropic":
             llm = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-opus-20240229")
-        elif self._llm_source == LLMSource.MISTRAL:
+        elif self._llm_source == "mistral":
             # Assuming MistralAI is a class similar to OpenAI and Anthropic
             llm = MistralAI(api_key=os.getenv("MISTRAL_API_KEY"))
-        elif self._llm_source == LLMSource.LOCAL:
+        elif self._llm_source == "local":
             llm = OpenAI(model="local-model", base_url="http://localhost:1234/v1", api_key="not-needed")
         else:
             raise ValueError(f"Unsupported LLM source: {self._llm_source}")
@@ -209,13 +210,50 @@ class RAGTool:
         return response
 
 
+def initialize_rag_tool(directory="./docs", llm_source="local"):
+    # Initialize and configure the RAGTool instance
+    rag_tool = RAGTool(directory=directory, llm_source=llm_source)
+    # You can run any initial setup here if necessary
+    return rag_tool
 
-def main():
-    # Init rag pipeline with documents
-    rag_tool = RAGTool(directory="./docs", llm_source=LLMSource.ANTHROPIC)
-    rag_tool.run_pipeline("web", "https://www.nytimes.com/")
-    response = rag_tool.query("what's in the news today?", "web")
-    print(response)
 
 if __name__ == '__main__':
-    main()
+    # For example, a demonstration of the tool's functionality
+    rag_tool_demo = initialize_rag_tool()
+
+
+# def main():
+#     # Init rag pipeline with documents
+#     rag_tool = RAGTool(directory="./docs", llm_source=LLMSource.ANTHROPIC)
+#     # rag_tool.run_pipeline("web", "https://www.kennedy24.com/labor-policy")
+#     # response = rag_tool.query('''
+#     #                           user:what does this hr bill do?
+#     #                           assistant: This HR bill, titled the "DHS Border Services Contracts Review Act", directs the Under Secretary for Management of the Department of Homeland Security to assess contracts for covered services performed by contractor personnel along the U.S. land border with Mexico.
+#     #                           Specifically, within 180 days of the bill's enactment, the Under Secretary must submit a report to Congress regarding active DHS contracts for covered border services that were awarded on or before September 30, 2023 or the date of enactment, whichever is later. 
+#     #                           The report must include the criteria DHS used to determine whether contractor personnel were necessary to assist the Department in carrying out the covered services along the southern border.
+#     #                           user: please enumerate how it directs the under secretary to assess contracts. Also are there any budgets or public meetings that must be proposed or standard processes bypassed in order to support this bill? Does this bill specify any areas that need to be addressed in particular?
+#     #                           ''', "pdf")
+#     response = rag_tool.query('''
+#                               user: Please provide detailed summaries of his policies and how he intends to help the middle and working class.
+#                               ''', "web")
+#     print("text response: ", response)
+#     # voice_id= "sFGsuVsnf5ieYfUlwn35"
+#     # api_key = "0674d03bef25b44f2c1816d72de268f1"
+#     # url = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+
+#     # import requests
+
+#     # url = "https://api.elevenlabs.io/v1/text-to-speech/sFGsuVsnf5ieYfUlwn35"
+
+#     # payload = {"text": f"{response}"}
+#     # headers = {
+#     #     "xi-api-key": api_key,
+#     #     "Content-Type": "application/json"
+#     # }
+
+#     # voice_response = requests.request("POST", url, json=payload, headers=headers)
+#     # print(voice_response)
+#     # print(response.text)
+
+# if __name__ == '__main__':
+#     main()

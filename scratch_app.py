@@ -143,4 +143,3 @@ rag_tool.load_and_process_documents(".py", "python")
 # Querying the system
 response = rag_tool.query("How does the privateGPT handle context retrieval?", ".py")
 print(response)
-
