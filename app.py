@@ -14,7 +14,10 @@ from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 from llama_index.llms.mistralai import MistralAI
-
+from llama_index.core.indices.query.query_transform.base import (
+    StepDecomposeQueryTransform,
+)
+from llama_index.core.query_engine import MultiStepQueryEngine
 import qdrant_client
 
 # Load environment variables
@@ -94,14 +97,14 @@ class RAGTool:
     def documents(self, documents):
         self._documents = documents
         
-    def _load_documents(self, document_type: str, directory: str=None):
+    def _load_documents(self, document_type: str, directory: str=None, crawl_depth: int=0):
         if document_type == "web":
             if directory:
                 url = directory
                 self.directory = url
             # loader = BeautifulSoupWebReader()
             # documents = loader.load_data(urls=[url])
-            loader = WholeSiteReader(prefix=url, max_depth=0)
+            loader = WholeSiteReader(prefix=url, max_depth=crawl_depth)
             documents = loader.load_data(base_url=url)
             
             # Initialize the scraper with a prefix URL and maximum depth
@@ -192,10 +195,17 @@ class RAGTool:
             # response_synthesizer = get_response_synthesizer(response_mode="compact")
             response_synthesizer = get_response_synthesizer(response_mode="tree_summarize")
             query_engine = RetrieverQueryEngine(retriever=retriever, response_synthesizer=response_synthesizer)
+            # step_decompose_transform = StepDecomposeQueryTransform(verbose=True)
+            # index_summary = "Used to answer questions about stored documents abd data"
+            # query_engine = MultiStepQueryEngine(
+            #     query_engine=query_engine,
+            #     query_transform=step_decompose_transform,
+            #     index_summary=index_summary,
+            # )
             self._query_engines[document_type] = query_engine
     
-    def run_pipeline(self, document_type: str, directory: str=None):
-        self._load_documents(document_type, directory)
+    def run_pipeline(self, document_type: str, directory: str=None, crawl_depth: int=0):
+        self._load_documents(document_type, directory, crawl_depth)
         self.node_parser = self.document_type
         # documents_to_ingest = self.clean_documents() added cleaning to loading so stored documents are cleaned already
         vector_store = QdrantVectorStore(client=self._client, collection_name=document_type)
@@ -210,7 +220,7 @@ class RAGTool:
         return response
 
 
-def initialize_rag_tool(directory="./docs", llm_source="local"):
+def initialize_rag_tool(directory="", llm_source="local"):
     # Initialize and configure the RAGTool instance
     rag_tool = RAGTool(directory=directory, llm_source=llm_source)
     # You can run any initial setup here if necessary

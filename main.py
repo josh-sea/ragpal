@@ -1,3 +1,5 @@
+import time
+import uuid
 import streamlit as st
 from app import initialize_rag_tool
 import os
@@ -7,19 +9,22 @@ import tempfile
 # Initialize your RAG tool outside the main app function to maintain state across sessions
 # rag_tool = RAGTool(directory="./docs", llm_source="anthropic")  # Adjust llm_source as needed
 
-def run_pipeline_wrapper(rag_tool, document_type, directory=None, upload=None):
+def run_pipeline_wrapper(rag_tool, document_type, directory=None, upload=None, crawl_depth=None):
     # Handle document upload or directory specification
     if upload:
-        print("getting file tmp path")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            for uploaded_file in upload:
-                bytes_data = uploaded_file.getvalue()
-                file_path = os.path.join(temp_dir, uploaded_file.name)
-                with open(file_path, "wb") as f:
-                    f.write(bytes_data)
-            # Update the directory to the temp directory with uploaded files
-            print("running pipeline")
-            rag_tool.run_pipeline(document_type, temp_dir)
+        if not crawl_depth:
+            print("getting file tmp path")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                for uploaded_file in upload:
+                    bytes_data = uploaded_file.getvalue()
+                    file_path = os.path.join(temp_dir, uploaded_file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(bytes_data)
+                # Update the directory to the temp directory with uploaded files
+                print("running pipeline")
+                rag_tool.run_pipeline(document_type, temp_dir)
+        else:
+            rag_tool.run_pipeline(document_type, temp_dir, crawl_depth)
     elif directory:
         rag_tool.run_pipeline(document_type, directory)
     else:
@@ -33,39 +38,78 @@ def estimate_height(text, line_height=20, padding=20, min_height=75):
 
 def main():
     rag_tool = initialize_rag_tool(directory="./docs", llm_source="anthropic")
+    st.set_page_config(layout="wide", initial_sidebar_state="auto", page_icon="🍕")
     st.title("RAG Tool Chat Interface")
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+        
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"], avatar=message["avatar"]):
+            st.markdown(message["content"])
+
 
     # Sidebar for pipeline controls and settings
     with st.sidebar:
         st.header("Settings")
         run_pipeline = st.checkbox("Run Pipeline", help="Toggle this to upload documents. Only run when new documents are added.")
         document_type = st.selectbox("Document Type", options=["web", "javascript", "python", "pdf", "docx", "csv"], index=0)
-        directory = st.text_input("Document Directory (Optional)", placeholder="/path/to/documents")
-        uploaded_files = st.file_uploader("Upload Documents", accept_multiple_files=True, type=['pdf', 'docx', 'csv', 'js', 'py'])
+        if document_type == "web":
+            crawl_depth = st.number_input("Web Crawl Depth (Default 0 - just the url provided)", placeholder=0, min_value=0, step=1)
+            uploaded_files = st.file_uploader("Upload Documents", accept_multiple_files=True, type=['pdf', 'docx', 'csv', 'js', 'py'], disabled=True)
+            directory = st.text_input("URL for web", placeholder="https://www.google.com")
+            upload_button = st.button("Crawl")
+        else:
+            # directory = st.text_input("Document Directory (Optional) - URL for web", placeholder="path/to/document")
+            uploaded_files = st.file_uploader("Upload Documents", accept_multiple_files=True, type=['pdf', 'docx', 'csv', 'js', 'py'], disabled=False)
+            upload_button = st.button("Upload")
 
     # Chat interface
     conversation_history = st.session_state.get("conversation_history", [])
-    user_input = st.text_input("Your Question:", placeholder="Type your question here...")
 
-    if st.button("Send"):
-        if user_input:
-            # Display user's question
-            conversation_history.append(f"You: {user_input}")
-            if run_pipeline:
-                run_pipeline_wrapper(rag_tool, document_type, directory, uploaded_files)
+    if upload_button:
+       if run_pipeline:
+           with st.spinner('Running pipeline'):
+               if document_type != "web":
+                   directory=None
+                   run_pipeline_wrapper(rag_tool, document_type, directory, uploaded_files) 
+               else:
+                   run_pipeline_wrapper(rag_tool, document_type, directory, uploaded_files, crawl_depth) 
 
-            # Generate and display the response
-            response = rag_tool.query(user_input, document_type)
-            conversation_history.append(f"RAG: {response}")
+    if user_input := st.chat_input("Type your question here..."):
+        # Display user's question
+        with st.chat_message("user", avatar="💪"):
+            st.markdown(user_input)
+        
+        st.session_state.messages.append({"role": "user", "content": user_input, "avatar": "💪"})
+    
+    
+        with st.chat_message("assistant", avatar="🦾"):
+            message_placeholder = st.empty()
+            full_response = ""
+            with st.spinner('working on it...'):
+                assistant_response = rag_tool.query(user_input, document_type)
+                # print(str(assistant_response).split())
 
-            # Update conversation history in state
-            st.session_state.conversation_history = conversation_history
+            for chunk in str(assistant_response).split():
+                full_response += chunk + " "
+                time.sleep(0.05)
+                    # Add a blinking cursor to simulate typing
+                message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+            
+        st.session_state.messages.append({"role": "assistant", "content": full_response, "avatar": "🦾"})
 
-        # Display conversation history
-        for chat in conversation_history:
-            height = estimate_height(chat)
-            st.text_area("", chat, height=height, key=chat[:10])
-
+    # Display conversation history
+    # for owner, chat, chat_id in conversation_history:
+    #     height = estimate_height(chat)
+    #     if owner == "user":
+    #         message = st.chat_message("user", avatar="😎")
+    #         message.write(chat)
+    #     else: 
+    #         message = st.chat_message("ai", avatar="🦾")
+    #         message.write(chat)
+    #         # st.text_area("", chat, height=height, key=chat_id)
 
 if __name__ == "__main__":
     main()
