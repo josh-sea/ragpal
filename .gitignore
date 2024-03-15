@@ -1,6 +1,16 @@
-# 
+# api keys and secrets
 .env
 
-
+/__pycache__
 # ignore docs
 /docs
+
+# ignore google service credentials
+myaiCred.json
+token.json
+
+# ignore timestamp tracking
+last_query_timestamp.json
+
+# ignore testing data
+messages.json

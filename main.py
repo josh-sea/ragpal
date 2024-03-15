@@ -1,5 +1,6 @@
 import time
 import uuid
+import json
 import streamlit as st
 from app import initialize_rag_tool
 import os
@@ -11,7 +12,11 @@ import tempfile
 
 def run_pipeline_wrapper(rag_tool, document_type, directory=None, upload=None, crawl_depth=None):
     # Handle document upload or directory specification
-    if upload:
+    if document_type == "email":
+        after = load_last_query_timestamp()
+        print(f"in run pipeline wrapper in main.py: {after}")
+        rag_tool.run_pipeline(document_type, directory, crawl_depth, after)
+    elif upload:
         if not crawl_depth:
             print("getting file tmp path")
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -30,7 +35,23 @@ def run_pipeline_wrapper(rag_tool, document_type, directory=None, upload=None, c
     else:
         st.error("Please upload documents or specify a directory.")
         
-        
+def save_last_query_timestamp(timestamp=None):    
+    # Save to Streamlit's session state
+    st.session_state['last_query_timestamp'] = timestamp
+
+def load_last_query_timestamp():
+    # Try loading from Streamlit's session state
+    if 'last_query_timestamp' in st.session_state:
+        return st.session_state['last_query_timestamp']
+    # Load from a local JSON file
+    try:
+        with open('last_query_timestamp.json', 'r') as file:
+            data = json.load(file)
+            save_last_query_timestamp(data.get('last_query_timestamp'))
+            return st.session_state['last_query_timestamp']
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
 def estimate_height(text, line_height=20, padding=20, min_height=75):
     lines = text.count('\n') + 1  # Count how many lines are in the text
     estimated_height = lines * line_height + padding  # Calculate height based on lines and line height
@@ -53,12 +74,15 @@ def main():
     with st.sidebar:
         st.header("Settings")
         run_pipeline = st.checkbox("Run Pipeline", help="Toggle this to upload documents. Only run when new documents are added.")
-        document_type = st.selectbox("Document Type", options=["web", "javascript", "python", "pdf", "docx", "csv"], index=0)
+        document_type = st.selectbox("Document Type", options=["web", "email", "javascript", "python", "pdf", "docx", "csv"], index=0)
         if document_type == "web":
             crawl_depth = st.number_input("Web Crawl Depth (Default 0 - just the url provided)", placeholder=0, min_value=0, step=1)
             uploaded_files = st.file_uploader("Upload Documents", accept_multiple_files=True, type=['pdf', 'docx', 'csv', 'js', 'py'], disabled=True)
             directory = st.text_input("URL for web", placeholder="https://www.google.com")
             upload_button = st.button("Crawl")
+        elif document_type == "email":
+            uploaded_files = st.file_uploader("Upload Documents", accept_multiple_files=True, type=['pdf', 'docx', 'csv', 'js', 'py'], disabled=True)
+            upload_button = st.button("Fetch latest emails")
         else:
             # directory = st.text_input("Document Directory (Optional) - URL for web", placeholder="path/to/document")
             uploaded_files = st.file_uploader("Upload Documents", accept_multiple_files=True, type=['pdf', 'docx', 'csv', 'js', 'py'], disabled=False)
@@ -73,6 +97,10 @@ def main():
                if document_type != "web":
                    directory=None
                    run_pipeline_wrapper(rag_tool, document_type, directory, uploaded_files) 
+               elif document_type == "email":
+                   directory=None
+                   uploaded_files=None
+                   run_pipeline_wrapper(rag_tool, document_type, directory, uploaded_files) 
                else:
                    run_pipeline_wrapper(rag_tool, document_type, directory, uploaded_files, crawl_depth) 
 
@@ -85,20 +113,29 @@ def main():
     
     
         with st.chat_message("assistant", avatar="🦾"):
-            message_placeholder = st.empty()
-            full_response = ""
+            # message_placeholder = st.empty()
+            # full_response = ""
             with st.spinner('working on it...'):
-                assistant_response = rag_tool.query(user_input, document_type)
-                # print(str(assistant_response).split())
-
-            for chunk in str(assistant_response).split():
-                full_response += chunk + " "
-                time.sleep(0.05)
-                    # Add a blinking cursor to simulate typing
-                message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
+                conversation = ""
+                for message in st.session_state.messages:
+                    role = message["role"]
+                    content = message["content"]
+                    conversation += f"role: {role}, content: {content}\n"  # Appending '\n' for a new line for readability
+                    print(f"conversation: {conversation}\n")
+                    
+                assistant_response = rag_tool.query(conversation, document_type)
             
-        st.session_state.messages.append({"role": "assistant", "content": full_response, "avatar": "🦾"})
+            st.markdown(assistant_response, unsafe_allow_html=True)
+            st.session_state.messages.append({"role": "assistant", "content": assistant_response, "avatar": "🦾"})
+                # print(str(assistant_response).split())
+            # for chunk in str(assistant_response).split():
+            #     full_response += chunk + " "
+            #     time.sleep(0.05)
+            #         # Add a blinking cursor to simulate typing
+            #     message_placeholder.markdown(full_response + "▌")
+            #     message_placeholder.markdown(full_response)
+            
+        
 
     # Display conversation history
     # for owner, chat, chat_id in conversation_history:
