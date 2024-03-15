@@ -19,11 +19,11 @@ from llama_index.core.indices.query.query_transform.base import (
     StepDecomposeQueryTransform,
 )
 from llama_index.core.query_engine import MultiStepQueryEngine
-import qdrant_client
+from qdrant_client import QdrantClient
 from llama_index.core import PromptTemplate
 from mail_manager import *
 import tempfile
-from typing import Any
+from typing import Any, Dict, Optional, Union, List, Optional
 
 
 # Load environment variables
@@ -36,18 +36,34 @@ class LLMSource(Enum):
     LOCAL = "local"
 
 class RAGTool:
-    def __init__(self, directory, model_name="BAAI/bge-small-en-v1.5", llm_source="local"):
+    """
+    A tool for Retrieval-Augmented Generation (RAG) which initializes different language models, 
+    sets up query engines, and ingests documents to be searchable.
+    """
+    def __init__(self, directory: str, model_name: str = "BAAI/bge-small-en-v1.5", llm_source: str = "local") -> None:
+        """
+        Initializes the RAGTool with the specified directory, model, and language model source.
+
+        :param directory: The directory where the documents are stored.
+        :param model_name: The name of the model to use for embeddings.
+        :param llm_source: The source of the language model, can be 'openai', 'anthropic', 'mistral', or 'local'.
+        """
         self._directory = directory
         self._model_name = model_name
-        self._client = qdrant_client.QdrantClient(url=os.getenv("QDRANT_URL"), api_key=os.getenv("QDRANT_API_KEY"))
+        self._client = QdrantClient(url=os.getenv("QDRANT_URL"), api_key=os.getenv("QDRANT_API_KEY"))
         self._documents = []
-        self._query_engines = {}
+        self._query_engines: Dict[str, RetrieverQueryEngine] = {}
         self._llm_source = llm_source
         self._llm = self.initialize_llm()
         self._embed_model = self.initialize_embed_model()
-        self._document_type = None
+        self._document_type: Optional[str] = None
         
-    def initialize_llm(self):
+    def initialize_llm(self) -> Any:
+        """
+        Initializes the language model based on the _llm_source attribute.
+
+        :return: An instance of the language model.
+        """
         if self._llm_source == "openai":
             llm = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4-turbo-preview")
         elif self._llm_source == "anthropic":
@@ -63,7 +79,13 @@ class RAGTool:
         Settings.llm = llm
         return llm
 
-    def file_mapping(self, type):
+    def file_mapping(self, type: str) -> str:
+        """
+        Maps a document type to its corresponding file extension.
+
+        :param type: The type of document (e.g., 'javascript', 'python').
+        :return: The file extension for the given document type.
+        """
         language_map = {
             'javascript':'.js',
             'python':'.py',
@@ -74,37 +96,78 @@ class RAGTool:
         return language_map[type]
 
         
-    def initialize_embed_model(self):
+    def initialize_embed_model(self) -> HuggingFaceEmbedding:
+        """
+        Initializes the embedding model using HuggingFaceEmbedding.
+
+        :return: An instance of HuggingFaceEmbedding.
+        """
         embed_model = HuggingFaceEmbedding(model_name=self._model_name)
         Settings.embed_model = embed_model
         return embed_model
     
     @property
-    def directory(self):
+    def directory(self) -> str:
+        """
+        Gets the directory of the RAGTool.
+
+        :return: The directory as a string.
+        """
         return self._directory
-    
+
     @directory.setter
-    def directory(self, directory):
+    def directory(self, directory: str) -> None:
+        """
+        Sets the directory of the RAGTool.
+
+        :param directory: The directory as a string.
+        """
         self._directory = directory
             
     @property
     def document_type(self):
+        """
+        Gets the document_type of the RAGTool.
+
+        :return: The document_type as a string.
+        """
         return self._document_type
 
     @document_type.setter
     def document_type(self, document_type):
+        """
+        Sets the document_type of the RAGTool.
+
+        :param document_type: The document_type as a string.
+        """
         self._document_type = document_type
 
     @property
     def documents(self):
+        """
+        Gets the documents of the RAGTool.
+
+        :return: The documents as a LlamaIndex Document.
+        """
         return self._documents
     
     @documents.setter
     def documents(self, documents):
+        """
+        Sets the documents of the RAGTool.
+
+        :param documents: The documents as a LlamaIndex Document.
+        """
         self._documents = documents
         
         
     def create_temp_json_file(self, json_data: Any) -> str:
+        """
+        Creates a temporary JSON file with the provided JSON data.
+
+        :param json_data: The JSON data to be written to the file.
+        :return: The file path of the created temporary JSON file.
+        """
         # Create a temporary directory
         temp_dir = tempfile.mkdtemp()
         # Define the file path
@@ -114,7 +177,13 @@ class RAGTool:
             json.dump(json_data, f, ensure_ascii=False)
         return file_path
     
-    def process_json_data_with_reader(self, json_data: Any):
+    def process_json_data_with_reader(self, json_data: Any) -> List:
+        """
+        Processes JSON data by reading it through a JSONReader, and optionally cleans up the created temporary files.
+
+        :param json_data: The JSON data to be processed.
+        :return: A list of document nodes obtained from processing the JSON data.
+        """
         # First, create a temporary JSON file
         json_file_path = self.create_temp_json_file(json_data)
         # Initialize your JSONReader (with desired configuration)
@@ -128,23 +197,27 @@ class RAGTool:
         return documents
 
 
-    def _load_documents(self, document_type: str, directory: str=None, crawl_depth: int=0, after=None):
+    def _load_documents(self, document_type: str, directory: Optional[str] = None, crawl_depth: int = 0, after: Optional[datetime] = None) -> None:
+        """
+        Loads documents based on the specified document type and additional parameters for document sourcing.
+
+        :param document_type: The type of documents to load ('web', 'email', or others).
+        :param directory: Optional directory or URL from where to load the documents.
+        :param crawl_depth: The depth for web crawling, applicable for web documents.
+        :param after: The datetime for fetching emails after this time, applicable for emails.
+        """
         if document_type == "web":
             if directory:
                 url = directory
                 self.directory = url
-            # loader = BeautifulSoupWebReader()
-            # documents = loader.load_data(urls=[url])
             loader = WholeSiteReader(prefix=url, max_depth=crawl_depth)
             documents = self.clean_documents(loader.load_data(base_url=url))
-            # Initialize the scraper with a prefix URL and maximum depth
             self.documents = documents
         elif document_type == "email":
             self.document_type = "email"
             print(f"in _load_documents in app.py: {after}")
-            new_emails = fetch_latest_emails(after)  # Your email fetching function 
+            new_emails = fetch_latest_emails(after)
             documents = self.clean_documents(self.process_json_data_with_reader(new_emails))
-            # Set up for email processing
             self.documents = documents
         else:    
             if directory:
@@ -154,6 +227,12 @@ class RAGTool:
             self.documents = self.clean_documents(reader.load_data())
 
     def clean_up_text(self, content: str) -> str:
+        """
+        Cleans up the text content by removing unnecessary characters and formatting.
+
+        :param content: The original text content.
+        :return: The cleaned-up text content.
+        """
         # cleans up line breaks, etc. 
         content = re.sub(r'(\w+)-\n(\w+)', r'\1\2', content)
         unwanted_patterns = ["\\n", "  —", "——————————", "—————————", "—————", r'\\u[\dA-Fa-f]{4}', r'\uf075', r'\uf0b7']
@@ -163,7 +242,13 @@ class RAGTool:
         content = re.sub(r'\s+', ' ', content)
         return content
 
-    def clean_documents(self, documents) -> list:
+    def clean_documents(self, documents: List) -> List:
+        """
+        Processes a list of documents to clean up the text content.
+
+        :param documents: A list of document nodes.
+        :return: A list of cleaned document nodes.
+        """
         # process all document context to clean up line breaks and wasteful character patterns
         cleaned_docs = []
         for d in documents:
@@ -175,10 +260,20 @@ class RAGTool:
 
     @property
     def node_parser(self):
+        """
+        Gets the node parser of the RAGTool.
+
+        :return: The node parser as a NodeParser.
+        """
         return self._node_parser
         
     @node_parser.setter
     def node_parser(self, document_type):
+        """
+        Sets the node parser of the RAGTool as a CodeSplitter, JSONNodeParser, or SemanticSplitterNodeParser (inherits from NodeParser)
+
+        :param document_type: The node parser as a string.
+        """
         if document_type == "javascript":
             node_parser = CodeSplitter(
                 language="javascript",
@@ -227,7 +322,13 @@ class RAGTool:
             self.setup_query_engine(document_type, vector_store)
         return self._query_engines[document_type]
 
-    def setup_query_engine(self, document_type, vector_store=None):
+    def setup_query_engine(self, document_type: str, vector_store: Optional[QdrantVectorStore] = None) -> None:
+        """
+        Sets up a query engine for a specific document type.
+
+        :param document_type: The type of document the query engine will be used for.
+        :param vector_store: An optional instance of QdrantVectorStore to be used with the query engine.
+        """
         if document_type not in self._query_engines:
             if vector_store == None:
                 vector_store = QdrantVectorStore(client=self._client, collection_name=document_type)
@@ -241,7 +342,15 @@ class RAGTool:
             query_engine = RetrieverQueryEngine(retriever=retriever, response_synthesizer=response_synthesizer)
             self._query_engines[document_type] = query_engine
     
-    def run_pipeline(self, document_type: str, directory: str=None, crawl_depth: int=0, after=None):
+    def run_pipeline(self, document_type: str, directory: Optional[str] = None, crawl_depth: int = 0, after: Optional[datetime] = None) -> None:
+        """
+        Runs the ingestion pipeline for a specific document type.
+
+        :param document_type: The type of documents to process.
+        :param directory: Optional directory containing documents to process.
+        :param crawl_depth: The depth for web crawling (applicable for web documents).
+        :param after: The datetime for fetching emails after this time (applicable for emails).
+        """
         print(f"in run pipeline in app.py: {after}")
         self._load_documents(document_type, directory, crawl_depth, after)
         self.node_parser = self.document_type
@@ -260,7 +369,15 @@ class RAGTool:
         response = query_engine.query(query_text)
         return response
 
-def initialize_rag_tool(directory="", llm_source="openai"):
+
+def initialize_rag_tool(directory: str = "", llm_source: str = "openai") -> RAGTool:
+    """
+    Initializes and returns an instance of the RAGTool class.
+
+    :param directory: The directory where the documents are stored.
+    :param llm_source: The source of the language model, can be 'openai', 'anthropic', 'mistral', or 'local'.
+    :return: An instance of RAGTool.
+    """
     # Initialize and configure the RAGTool instance
     rag_tool = RAGTool(directory=directory, llm_source=llm_source)
     # You can run any initial setup here if necessary
