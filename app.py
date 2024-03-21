@@ -72,7 +72,7 @@ class RAGTool:
             # Assuming MistralAI is a class similar to OpenAI and Anthropic
             llm = MistralAI(api_key=os.getenv("MISTRAL_API_KEY"))
         elif self._llm_source == "local":
-            llm = OpenAI(model="local-model", base_url="http://localhost:1234/v1", api_key="not-needed")
+            llm = OpenAI(base_url="http://localhost:1234/v1", api_base="http://localhost:1234/v1", api_key="not-needed")
         else:
             raise ValueError(f"Unsupported LLM source: {self._llm_source}")
 
@@ -210,12 +210,18 @@ class RAGTool:
             if directory:
                 url = directory
                 self.directory = url
-            loader = WholeSiteReader(prefix=url, max_depth=crawl_depth)
-            documents = self.clean_documents(loader.load_data(base_url=url))
+
+            loader = BeautifulSoupWebReader()
+            documents = self.clean_documents(loader.load_data(urls=[url]))
+            # print(documents[0])
+            # loader = WholeSiteReader(
+            #     prefix=url,
+            #     max_depth=crawl_depth
+            # )
+            # documents = self.clean_documents(loader.load_data(base_url=url))
             self.documents = documents
         elif document_type == "email":
             self.document_type = "email"
-            print(f"in _load_documents in app.py: {after}")
             new_emails = fetch_latest_emails(after)
             documents = self.clean_documents(self.process_json_data_with_reader(new_emails))
             self.documents = documents
@@ -351,7 +357,6 @@ class RAGTool:
         :param crawl_depth: The depth for web crawling (applicable for web documents).
         :param after: The datetime for fetching emails after this time (applicable for emails).
         """
-        print(f"in run pipeline in app.py: {after}")
         self._load_documents(document_type, directory, crawl_depth, after)
         self.node_parser = self.document_type
         # if document_type == "email":

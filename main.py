@@ -14,7 +14,6 @@ def run_pipeline_wrapper(rag_tool, document_type, directory=None, upload=None, c
     # Handle document upload or directory specification
     if document_type == "email":
         after = load_last_query_timestamp()
-        print(f"in run pipeline wrapper in main.py: {after}")
         rag_tool.run_pipeline(document_type, directory, crawl_depth, after)
     elif upload:
         if not crawl_depth:
@@ -121,7 +120,6 @@ def main():
                     role = message["role"]
                     content = message["content"]
                     conversation += f"role: {role}, content: {content}\n"  # Appending '\n' for a new line for readability
-                    print(f"conversation: {conversation}\n")
                     
                 assistant_response = rag_tool.query(conversation, document_type)
             
